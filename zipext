@@ -1,0 +1,146 @@
+This is my code for extracting zip folder and concurrent folders inside it:                                                 public static class ZipExtraction
+    {
+        [FunctionName("ZipExtraction")]
+        public static async Task<IActionResult> Run(
+            [HttpTrigger(AuthorizationLevel.Function, "get", "post", Route = null)] HttpRequest req,
+            ILogger log)
+        {
+            string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
+            dynamic data = JsonConvert.DeserializeObject(requestBody);
+
+            string folderPath = data?.folderPath;
+
+            string password = data?.password;
+            string extractFilePath = data?.extractFilePath;
+            bool? IsRetainZipFolderStructure = data?.retainFolderStructure;
+
+            if (IsRetainZipFolderStructure == null)
+            {
+                return new BadRequestObjectResult("Please provide a valid value for retainFolderStructure.");
+            }
+
+            // Unbox the nullable boolean into a non-nullable boolean variable
+            bool retainFolderStructure = IsRetainZipFolderStructure.Value;
+
+
+            if (string.IsNullOrEmpty(folderPath))
+            {
+                return new BadRequestObjectResult("Please provide a valid folder path.");
+            }
+
+            if (string.IsNullOrEmpty(extractFilePath))
+            {
+                return new BadRequestObjectResult("Please provide a valid extract file path.");
+            }
+
+            // Retrieve connection string and container name from app settings
+            string storageConnectionString = Environment.GetEnvironmentVariable("BlobStorageConnection");
+            string containerName = Environment.GetEnvironmentVariable("BlobStorageContainer");
+
+            try
+            {
+                // Retrieve reference to a blob
+                CloudStorageAccount storageAccount = CloudStorageAccount.Parse(storageConnectionString);
+                CloudBlobClient blobClient = storageAccount.CreateCloudBlobClient();
+                CloudBlobContainer container = blobClient.GetContainerReference(containerName);
+
+                // Retrieve reference to the zip file blob
+                //CloudBlockBlob zipFileBlob = container.GetBlockBlobReference(zipFilePath);
+                // Get the reference to the folder
+                CloudBlobDirectory folder = container.GetDirectoryReference(folderPath);
+                string responseMessage = "";
+
+                // Iterate over all the zip files in the folder
+                foreach (IListBlobItem item in folder.ListBlobs(true).OfType<CloudBlockBlob>().Where(b => b.Name.EndsWith(".zip")))
+                {
+                    CloudBlockBlob zipFileBlob = (CloudBlockBlob)item;
+
+                    using (Stream zipStream = await zipFileBlob.OpenReadAsync())
+                    {
+                        using (ZipFile zipFile = ZipFile.Read(zipStream))
+                        {
+                            zipFile.Password = password;
+
+                            foreach (ZipEntry entry in zipFile)
+                            {
+
+                                string folderName = zipFileBlob.Name;
+                                if (folderName.Contains("/"))
+                                {
+                                    folderName = folderName.Split("/")[folderName.Split("/").Length - 1].Replace(".zip", "");
+                                }
+                                if (!string.IsNullOrEmpty(entry.FileName))
+                                {
+                                    if (entry.FileName.EndsWith("/"))
+                                    {
+                                        // If the entry is a directory, create it.
+                                        if ((bool)IsRetainZipFolderStructure)
+                                        {
+                                            string directoryPath = Path.Combine(extractFilePath, zipFileBlob.Name.Replace(".zip", ""), entry.FileName);
+                                            container.GetBlockBlobReference(directoryPath);
+                                        }
+                                        else
+                                        {
+                                            string directoryPath = Path.Combine(extractFilePath, entry.FileName);
+                                            container.GetBlockBlobReference(directoryPath);
+                                        }
+                                    }
+                                    else if (entry.UsesEncryption)
+
+                                    {
+                                        try
+                                        {
+
+                                            // Extract the password-protected file to a new blob
+                                            string extractedFileName = Path.GetFileName(entry.FileName);
+                                            
+                                            CloudBlockBlob extractedFileBlob = container.GetBlockBlobReference(
+                                                (bool)IsRetainZipFolderStructure ? extractFilePath + "/" + folderName + "/" + extractedFileName
+                                                : extractFilePath + "/" + extractedFileName);
+
+                                            // Extract the password-protected file to a new blob
+
+                                            using (Stream extractedFileStream = await extractedFileBlob.OpenWriteAsync())
+                                            {
+                                                entry.ExtractWithPassword(extractedFileStream, password);
+                                            }
+                                            responseMessage += $"Password matched for {entry.FileName}. Extracted file: {extractedFileName}\n";
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            responseMessage += $"Password didn't match for {entry.FileName}. Extraction failed with error: {ex.Message}\n";
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // Extract the file to a new blob
+                                        string extractedFileName = Path.GetFileName(entry.FileName);
+                                        
+                                        CloudBlockBlob extractedFileBlob = container.GetBlockBlobReference(
+                                        (bool)IsRetainZipFolderStructure ? extractFilePath + "/" + folderName + "/" + extractedFileName
+                                    : extractFilePath + "/" + extractedFileName);
+                                        using (Stream extractedFileStream = await extractedFileBlob.OpenWriteAsync())
+                                        {
+
+                                            entry.Extract(extractedFileStream.ToString(), ExtractExistingFileAction.OverwriteSilently);
+                                        }
+                                        responseMessage += $"No password required for {entry.FileName}. Extracted file: {extractedFileName}\n";
+                                    }
+                                }
+
+                            }
+                        }
+                    }
+
+                }
+                return new OkObjectResult(responseMessage);
+            }
+
+            catch (Exception ex)
+            {
+                return new BadRequestObjectResult($"Error extracting zip file: {ex.Message}");
+            }
+
+        }
+    }
+But I am getting Timeout error ,because there are thousand of file inside the zip folder. Can you modify my code and increase the TimeOut and implement Multithreading
