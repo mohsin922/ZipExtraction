@@ -1,0 +1,68 @@
+[HttpTrigger(AuthorizationLevel.Function, "get", "post", Route = null, Connection = "AzureWebJobsStorage", 
+    Timeout = "00:10:00")] // increase timeout to 10 minutes
+
+
+
+// Iterate over all the zip files in the folder
+Parallel.ForEach(folder.ListBlobs(true).OfType<CloudBlockBlob>().Where(b => b.Name.EndsWith(".zip")), async (item) =>
+{
+    CloudBlockBlob zipFileBlob = (CloudBlockBlob)item;
+
+    using (Stream zipStream = await zipFileBlob.OpenReadAsync())
+    {
+        using (ZipFile zipFile = ZipFile.Read(zipStream))
+        {
+            zipFile.Password = password;
+
+            foreach (ZipEntry entry in zipFile)
+            {
+                // rest of the code
+            }
+        }
+    }
+});
+
+
+
+// Retrieve reference to a blob
+CloudStorageAccount storageAccount = CloudStorageAccount.Parse(storageConnectionString);
+CloudBlobClient blobClient = storageAccount.CreateCloudBlobClient();
+CloudBlobContainer container = blobClient.GetContainerReference(containerName);
+
+// Iterate over all the zip files in the folder
+Parallel.ForEach(folder.ListBlobs(true).OfType<CloudBlockBlob>().Where(b => b.Name.EndsWith(".zip")), async (item) =>
+{
+    CloudBlockBlob zipFileBlob = (CloudBlockBlob)item;
+
+    using (Stream zipStream = await zipFileBlob.OpenReadAsync())
+    {
+        using (ZipFile zipFile = ZipFile.Read(zipStream))
+        {
+            zipFile.Password = password;
+
+            foreach (ZipEntry entry in zipFile)
+            {
+                string folderName = zipFileBlob.Name;
+                if (folderName.Contains("/"))
+                {
+                    folderName = folderName.Split("/")[folderName.Split("/").Length - 1].Replace(".zip", "");
+                }
+                if (!string.IsNullOrEmpty(entry.FileName))
+                {
+                    if (entry.FileName.EndsWith("/"))
+                    {
+                        // rest of the code
+                    }
+                    else if (entry.UsesEncryption)
+                    {
+                        // rest of the code
+                    }
+                    else
+                    {
+                        // rest of the code
+                    }
+                }
+            }
+        }
+    }
+});
